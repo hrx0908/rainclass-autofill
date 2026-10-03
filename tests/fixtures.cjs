@@ -5,7 +5,7 @@ function fixedParts(entry) {
 }
 
 // Synthetic reactive exercise: no account, real exported page or network operations.
-function fixture({ entries, chapter = '测试章节', types = ['single','multiple','judgment','blank'], course = 'engineering', optionKeys = ['A','B','C','D'] } = {}) {
+function fixture({ entries, chapter = '测试章节', types = ['single','multiple','judgment','blank'], course = 'engineering', optionKeys = ['A','B','C','D'], questions } = {}) {
   const win = new JSDOM('<p id="progress"></p><nav id="nav"></nav><main id="work"></main><button id="submit">提交</button><div role="status" id="notice"></div>', {
     url: 'https://www.yuketang.cn/ai-workspace/lms-graph/100/exercise/200', pretendToBeVisual: true
   }).window;
@@ -37,9 +37,9 @@ function fixture({ entries, chapter = '测试章节', types = ['single','multipl
         input.addEventListener('input', () => { drafts[index][i] = input.value; }); problem.append(input, p[i + 1]);
       });
     } else {
-      problem.textContent = '人工构造的选择题完整测试题干。'; // Deliberately identical stems test ordinal signatures.
+      problem.textContent = questions?.[index]?.text ?? '人工构造的选择题完整测试题干。'; // Identical stems test ordinal signatures by default.
       const list = doc.createElement('ul'); list.className = type === 'multiple' ? 'list-unstyled-checkbox' : 'list-unstyled-radio'; body.append(list);
-      for (const key of type === 'judgment' ? ['false','true'] : optionKeys) {
+      for (const key of type === 'judgment' ? ['false','true'] : questions?.[index]?.options.map(option => option.key) ?? optionKeys) {
         const row = doc.createElement('li'), label = doc.createElement('label');
         label.className = type === 'multiple' ? 'el-checkbox' : 'el-radio'; row.append(label); list.append(row);
         const input = doc.createElement('input'); input.type = type === 'multiple' ? 'checkbox' : 'radio'; input.name = 'test-choice'; input.value = key;
@@ -47,7 +47,7 @@ function fixture({ entries, chapter = '测试章节', types = ['single','multipl
         if (submitted.has(index)) label.classList.add('is-disabled');
         if (type !== 'judgment') {
           const keyNode = doc.createElement('span'); keyNode.className = type === 'multiple' ? 'checkboxInput' : 'radioInput'; keyNode.textContent = key;
-          const text = doc.createElement('span'); text.className = type === 'multiple' ? 'checkboxText' : 'radioText'; text.textContent = '示例选项' + key; label.append(keyNode, text);
+          const text = doc.createElement('span'); text.className = type === 'multiple' ? 'checkboxText' : 'radioText'; text.textContent = questions?.[index]?.options.find(option => option.key === key)?.text ?? '示例选项' + key; label.append(keyNode, text);
         } else label.append(key === 'true' ? '√' : '×');
         input.addEventListener('change', () => {
           drafts[index] = [...list.querySelectorAll('input:checked')].map(node => node.value);
@@ -64,7 +64,7 @@ function fixture({ entries, chapter = '测试章节', types = ['single','multipl
   doc.getElementById('submit').addEventListener('click', () => { clicks.push(current + 1); submitted.add(current); render(current); doc.getElementById('notice').textContent = '本题已提交'; });
   render(0);
   const controller = new api.Controller(win, { pacing: false, poll: 1, settle: 0, timeout: 250 });
-  controller.course = course; controller.source = course === 'career' ? api.CAREER_SOURCE : api.ENGINEERING_SOURCE; controller.chapter = chapter; controller.entries = entries;
+  controller.course = course; controller.source = course === 'literacy' ? api.LITERACY_SOURCE : course === 'career' ? api.CAREER_SOURCE : api.ENGINEERING_SOURCE; controller.chapter = chapter; controller.entries = entries;
   return { win, doc, controller, drafts, clicks, visited, render };
 }
 
