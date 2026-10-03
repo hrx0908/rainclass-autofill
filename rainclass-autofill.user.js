@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         雨课堂题干匹配填充（逐题提交）
 // @namespace    local.rainclass.autofill
-// @version      0.1.18
+// @version      0.1.19
 // @author       hrx0908
 // @license      MIT; third-party content retains its original rights
 // @homepageURL  https://github.com/hrx0908/rainclass-autofill
 // @supportURL   https://github.com/hrx0908/rainclass-autofill/issues
 // @updateURL    https://raw.githubusercontent.com/hrx0908/rainclass-autofill/main/rainclass-autofill.meta.js
 // @downloadURL  https://raw.githubusercontent.com/hrx0908/rainclass-autofill/main/rainclass-autofill.user.js
-// @description  支持人工智能安全与伦理、科研伦理与学术规范、工程伦理，预览并核对参考答案，跳过待核对题逐题提交。
+// @description  支持人工智能安全与伦理、科研伦理与学术规范、工程伦理、研究生生涯发展与规划，预览核对答案，跳过待核对题逐题提交。
 // @match        https://www.yuketang.cn/ai-workspace/lms-graph/*/exercise/*
 // @match        https://yuketang.cn/ai-workspace/lms-graph/*/exercise/*
 // @grant        GM_xmlhttpRequest
@@ -35,7 +35,25 @@
   const SOURCE = 'https://www.cnblogs.com/unioner/p/19323416/xidian-2025-master-artificial-intelligence-safety-and-ethics-exercise-answers-12a3oe';
   const HOST_ID = 'rainclass-autofill-panel';
   const SLOT = '\uFFF0';
-  const VERSION = '0.1.18';
+  const VERSION = '0.1.19';
+  const CAREER_SOURCE = 'https://blog.csdn.net/weixin_69243534/article/details/155093080';
+  const CAREER_CHAPTER = '第二章习题';
+  // Each cell retains its question position, including the unanswered final cell of chapter two.
+  const CAREER_CHAPTERS = [
+    { chapter: "第二章习题", keys: ["C","A","A","ABCD","ABC","对","对","对","DB",""] },
+    { chapter: "第三章习题", keys: ["A","B","C","B","D","错","对","对","ABC","ABCD"] },
+    { chapter: "第四章习题", keys: ["C","D","C","对","错","对","对","错","AB","ABC"] },
+    { chapter: "第五章习题", keys: ["D","C","C","A","B","错","对","错","ABC","ABCD"] },
+    { chapter: "第六章习题", keys: ["A","A","B","B","C","错","对","ABCDE","ABC","ABCD"] },
+    { chapter: "第七章习题", keys: ["A","C","D","D","B","错","错","错","ABC","ABCDE"] },
+    { chapter: "第八章习题", keys: ["A","B","C","A","B","对","错","错","ABC","ABC"] },
+    { chapter: "第九章习题", keys: ["B","C","D","B","对","错","对","错","ABCD","ABC"] },
+    { chapter: "第十章习题", keys: ["C","B","B","A","D","对","错","错","ABCDE","ABCD"] },
+    { chapter: "第十一章习题", keys: ["C","A","C","A","对","对","错","对","ABCDE","ABC"] },
+    { chapter: "第十二章习题", keys: ["B","D","B","B","C","错","AC","对","对","ABC"] },
+    { chapter: "第十三章习题", keys: ["B","A","C","D","D","对","对","对","ACD","ABCD"] },
+    { chapter: "第十四章习题", keys: ["A","A","对","对","对","对","对","错","ABCDE","ABCD"] }
+  ];
   const ENGINEERING_SOURCE = 'https://mp.weixin.qq.com/s/0UapbigA5py41rIf7ibX1A';
   const ENGINEERING_CHAPTER = '第一章习题';
   // Answer keys retain their source positions; screenshot blanks are matched by their full text.
@@ -1540,11 +1558,21 @@
       })
     ]);
   }
+  function careerEntries() {
+    // The user verified that chapter two's DB cell contains answers to two successive questions.
+    const corrections = [{ index: 9, from: 'DB', to: 'D' }, { index: 10, from: '', to: 'B' }];
+    return CAREER_CHAPTERS.flatMap(({ chapter, keys }) => keys.map((key, index) => {
+      const correction = chapter === CAREER_CHAPTER ? corrections.find(item => item.index === index + 1 && item.from === key) : null;
+      return { type: 'sequence', chapter, sourceIndex: index + 1, raw: key, masked: '', answers: [],
+        sequenceAnswer: correction?.to ?? key, source: CAREER_SOURCE,
+        ...(correction ? { sourceAnswer: key, referenceCorrection: '用户核对：第二章第9题为D，第10题为B；原表将DB写在第9题单元格，第10题留空。' } : {}) };
+    }));
+  }
   function localCourseEntries(course) {
-    return course === 'engineering' ? engineeringEntries() : course === 'research' ? researchEntries() : null;
+    return course === 'career' ? careerEntries() : course === 'engineering' ? engineeringEntries() : course === 'research' ? researchEntries() : null;
   }
   function courseSource(course) {
-    return course === 'engineering' ? ENGINEERING_SOURCE : course === 'research' ? RESEARCH_SOURCE : SOURCE;
+    return course === 'career' ? CAREER_SOURCE : course === 'engineering' ? ENGINEERING_SOURCE : course === 'research' ? RESEARCH_SOURCE : SOURCE;
   }
   function researchEntries() {
     return RESEARCH_CHAPTERS.flatMap(({ chapter, questions }) => questions.map((question, index) => {
@@ -1568,7 +1596,7 @@
   const DEFAULTS = {
     answerSelector: 'input[placeholder*="答案"],textarea[placeholder*="答案"],[contenteditable]:not([contenteditable="false"])[data-placeholder*="答案"],[contenteditable]:not([contenteditable="false"])[placeholder*="答案"],[contenteditable]:not([contenteditable="false"])[aria-label*="答案"]',
     questionSelector: '', navSelector: '', submitSelector: '',
-    timeout: 12000, poll: 120, settle: 250, maxQuestions: 250, pacing: true, imageOrder: true, engineeringOrder: true, skipUnmatched: true
+    timeout: 12000, poll: 120, settle: 250, maxQuestions: 250, pacing: true, imageOrder: true, engineeringOrder: true, careerOrder: true, skipUnmatched: true
   };
   // Sample each pause separately; readiness checks remain independent of pacing.
   const PACING = Object.freeze({
@@ -1926,15 +1954,24 @@
       const match = matchQuestion(question, candidates, chapter, { imageOrder: false });
       return match.status === 'matched' && !match.exact ? unmatched('工程伦理填空题需要完整题干和全部空格一致，请手工核对。') : match;
     }
-    if (options.engineeringOrder === false) return unmatched('工程伦理按题号匹配已关闭；来源缺少完整选择题题干，请手工核对。');
-    if (!chapter) return unmatched('工程伦理参考资料按章节题号排列，请先选择当前作业对应的参考章节。');
+    return matchSequenceQuestion(question, entries, chapter, { ...options, orderEnabled: options.engineeringOrder, courseName: '工程伦理', method: 'engineering-order' });
+  }
+  function matchCareerQuestion(question, entries, chapter = '', options = {}) {
+    return matchSequenceQuestion(question, entries, chapter, { ...options, orderEnabled: options.careerOrder, courseName: '研究生生涯发展与规划', method: 'career-order' });
+  }
+  function matchSequenceQuestion(question, entries, chapter, options) {
+    const unmatched = reason => ({ status: 'unmatched', reason }), name = options.courseName;
+    if (question.type === 'unsupported') return unmatched(question.reason);
+    if (question.type === 'blank') return unmatched(name + '来源只提供选项字母和对/错，当前填空题需手工核对。');
+    if (options.orderEnabled === false) return unmatched(name + '按题号匹配已关闭；来源缺少完整选择题题干，请手工核对。');
+    if (!chapter) return unmatched(name + '参考资料按章节题号排列，请先选择当前作业对应的参考章节。');
     const records = entries.filter(entry => entry.chapter === chapter);
     if (!records.length || !Number.isInteger(options.total) || options.total !== records.length) {
-      return unmatched('当前作业题数与所选工程伦理章节的 ' + records.length + ' 条参考记录不一致或无法读取，不能按题号套用，请核对章节或手工处理。');
+      return unmatched('当前作业题数与所选' + name + '章节的 ' + records.length + ' 条参考记录不一致或无法读取，不能按题号套用，请核对章节或手工处理。');
     }
-    if (!Number.isInteger(question.ordinal) || question.ordinal < 1 || question.ordinal > options.total) return unmatched('不能可靠读取工程伦理题号，请手工核对。');
+    if (!Number.isInteger(question.ordinal) || question.ordinal < 1 || question.ordinal > options.total) return unmatched('不能可靠读取' + name + '题号，请手工核对。');
     const candidates = records.filter(entry => entry.sourceIndex === question.ordinal);
-    if (candidates.length !== 1) return unmatched('所选工程伦理章节的本题参考记录不唯一或缺失，请手工核对。');
+    if (candidates.length !== 1) return unmatched('所选' + name + '章节的本题参考记录不唯一或缺失，请手工核对。');
     const entry = candidates[0], key = entry.sequenceAnswer;
     let answers;
     if (key === '对' || key === '错') {
@@ -1946,7 +1983,7 @@
       if (question.type === 'single' && answers.length !== 1) return unmatched('参考答案包含多个选项，但页面为单选题，请手工核对。');
     } else return unmatched('本题没有可按题号套用的选项参考答案，请手工核对。');
     if (new Set(answers).size !== answers.length || !answers.every(answer => question.options.some(option => option.key === answer))) return unmatched('参考答案与当前选项控件不一致，请手工核对。');
-    return { status: 'matched', answers: choiceAnswers(question, answers), entry, exact: false, method: 'engineering-order' };
+    return { status: 'matched', answers: choiceAnswers(question, answers), entry, exact: false, method: options.method };
   }
 
   function choiceAnswers(question, answers) {
@@ -2281,9 +2318,9 @@
     log(message) { this.hooks.log?.(message); }
     invalidate(clearScan = false) { this.plan = null; this.trial = false; if (clearScan) this.scanState = null; this.hooks.change?.(); }
     scanContextKey() {
-      const { answerSelector, questionSelector, navSelector, submitSelector, imageOrder, engineeringOrder, skipUnmatched, maxQuestions } = this.config;
+      const { answerSelector, questionSelector, navSelector, submitSelector, imageOrder, engineeringOrder, careerOrder, skipUnmatched, maxQuestions } = this.config;
       return JSON.stringify([this.course, this.source, this.chapter,
-        { answerSelector, questionSelector, navSelector, submitSelector, imageOrder, engineeringOrder, skipUnmatched, maxQuestions }, this.entries, [...this.overrides]]);
+        { answerSelector, questionSelector, navSelector, submitSelector, imageOrder, engineeringOrder, careerOrder, skipUnmatched, maxQuestions }, this.entries, [...this.overrides]]);
     }
     resumeStatus() {
       const state = this.scanState, report = this.lastScan;
@@ -2355,17 +2392,18 @@
     current() {
       const question = readQuestion(this.doc, this.config);
       // Identical stems can occupy different positions in an ordinal-only source.
-      if (this.course === 'engineering') question.signature = JSON.stringify(['engineering', question.ordinal, question.signature]);
+      if (this.course === 'engineering' || this.course === 'career') question.signature = JSON.stringify([this.course, question.ordinal, question.signature]);
       return question;
     }
     resolve(question) {
       if (question.type === 'unsupported') return { status: 'unmatched', reason: question.reason };
       const manual = this.overrides.get(question.signature);
       if (manual) return { status: 'matched', answers: question.options ? choiceAnswers(question, manual) : [...manual], manual: true };
-      if (this.course === 'engineering') {
+      if (this.course === 'engineering' || this.course === 'career') {
         let total = null;
         try { total = discoverNavigation(this.doc, this.config).total; } catch { /* Never guess the count for ordinal references. */ }
-        return matchEngineeringQuestion(question, this.entries, this.chapter, { ...this.config, total });
+        const matcher = this.course === 'career' ? matchCareerQuestion : matchEngineeringQuestion;
+        return matcher(question, this.entries, this.chapter, { ...this.config, total });
       }
       return matchQuestion(question, this.entries, this.chapter, this.config);
     }
@@ -2518,11 +2556,12 @@
           ...(question.options ? { options: question.options.map(option => ({ key: option.key, text: option.text, ...(option.imageDependent ? { imageDependent: true } : {}) })) } : {}),
           status: match.status, reason: match.reason ?? '', method: match.method ?? (match.manual ? 'manual' : 'text'), submitted: record.submitted,
           fontSource: question.fontSource, sourceChapter: match.entry?.chapter ?? null, sourceIndex: match.entry?.sourceIndex ?? null,
+          ...(match.entry?.referenceCorrection ? { referenceCorrection: match.entry.referenceCorrection, sourceAnswer: match.entry.sourceAnswer } : {}),
           root: { tag: question.root.tagName, classes: [...question.root.classList], mathjaxElements: question.root.querySelectorAll('.MathJax,.MathJax_SVG,.MathJax_MathML').length,
             hiddenTextElements: [...question.root.querySelectorAll('[hidden],[aria-hidden="true"],.MathJax_Preview,.MJX_Assistive_MathML')].slice(0,12).map(el => ({ tag: el.tagName, classes: [...el.classList], textLength: el.textContent.length })) }
         });
         records.push(record); this.lastScan.nextIndex = index + 1;
-        this.log('第 ' + index + '/' + total + ' 题：' + (match.status === 'matched' ? (record.submitted ? '已提交/只读' : ['chapter-order','engineering-order'].includes(match.method) ? '按章节题号匹配成功（参考第 ' + match.entry.sourceIndex + ' 条）' : '匹配成功') : match.reason));
+        this.log('第 ' + index + '/' + total + ' 题：' + (match.status === 'matched' ? (record.submitted ? '已提交/只读' : ['chapter-order','engineering-order','career-order'].includes(match.method) ? '按章节题号匹配成功（参考第 ' + match.entry.sourceIndex + ' 条）' : '匹配成功') : match.reason));
         this.hooks.change?.();
       } } catch (error) {
         this.lastScan.stopReason = error.message; this.lastScan.stoppedAt = new Date().toISOString();
@@ -2746,15 +2785,16 @@
     const shadow = host.attachShadow({ mode: 'open' });
     shadow.innerHTML = `<style>
       :host{all:initial;position:fixed;right:16px;bottom:16px;z-index:2147483646;font:13px/1.5 system-ui,sans-serif;color:#172033}
-      *{box-sizing:border-box}section{width:min(320px,calc(100vw - 16px));max-height:85vh;overflow:auto;background:#fff;border:1px solid #cbd5e1;border-radius:12px;box-shadow:0 8px 35px #0003;padding:14px}header{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:15px;font-weight:650;margin-bottom:8px;cursor:grab;user-select:none;touch-action:none;position:sticky;top:0;background:#fff;z-index:1}button{cursor:pointer;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;padding:7px 10px;color:#172033;font:inherit}button:disabled{opacity:.45;cursor:default}.primary{background:#2563eb;color:white;border-color:#2563eb}.row{display:flex;gap:6px;margin:8px 0}.row>*{flex:1}select,input[type=text],textarea{width:100%;font:inherit;border:1px solid #cbd5e1;border-radius:5px;padding:6px}label{display:block;margin:6px 0}.muted{color:#64748b;font-size:12px}#log{white-space:pre-wrap;max-height:100px;overflow:auto;background:#f1f5f9;padding:7px;border-radius:6px;font-size:12px}#preview{max-height:220px;overflow:auto}.min #content{display:none}details{margin-top:8px}
+      *{box-sizing:border-box}[hidden]{display:none!important}section{width:min(320px,calc(100vw - 16px));max-height:85vh;overflow:auto;background:#fff;border:1px solid #cbd5e1;border-radius:12px;box-shadow:0 8px 35px #0003;padding:14px}header{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:15px;font-weight:650;margin-bottom:8px;cursor:grab;user-select:none;touch-action:none;position:sticky;top:0;background:#fff;z-index:1}button{cursor:pointer;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;padding:7px 10px;color:#172033;font:inherit}button:disabled{opacity:.45;cursor:default}.primary{background:#2563eb;color:white;border-color:#2563eb}.row{display:flex;gap:6px;margin:8px 0}.row>*{flex:1}select,input[type=text],textarea{width:100%;font:inherit;border:1px solid #cbd5e1;border-radius:5px;padding:6px}label{display:block;margin:6px 0}.muted{color:#64748b;font-size:12px}#log{white-space:pre-wrap;max-height:100px;overflow:auto;background:#f1f5f9;padding:7px;border-radius:6px;font-size:12px}#preview{max-height:220px;overflow:auto}.min #content{display:none}details{margin-top:8px}
     </style><section><header title="按住标题栏拖动；双击标题栏恢复右下角"><span>雨课堂填充 ${VERSION}</span><button id="toggle">收起</button></header><div id="content">
       <div class="muted" id="matchMode">支持填空、单选、多选、判断；按题干和答案匹配，每题单独提交。</div>
       <div class="muted">已启用随机间隔；页面加载较慢时会继续等待。</div>
-      <label>课程 <select id="course"><option value="ai">人工智能安全与伦理</option><option value="research">科研伦理与学术规范</option><option value="engineering">工程伦理</option></select></label>
+      <label>课程 <select id="course"><option value="ai">人工智能安全与伦理</option><option value="research">科研伦理与学术规范</option><option value="engineering">工程伦理</option><option value="career">研究生生涯发展与规划</option></select></label>
       <div class="row"><button id="load" class="primary">读取参考题库</button><button id="stop">停止</button></div>
       <label>参考章节 <select id="chapter"><option value="">自动按题干匹配全部章节</option></select></label>
       <label id="imageOrderLabel"><input id="imageOrder" type="checkbox" checked> 图片题按所选章节题号匹配</label>
       <label id="engineeringOrderLabel" hidden><input id="engineeringOrder" type="checkbox" checked> 工程伦理按章节、题号和选项字母匹配</label>
+      <label id="careerOrderLabel" hidden><input id="careerOrder" type="checkbox" checked> 生涯规划按章节、题号和选项字母匹配</label>
       <div class="row"><button id="previewButton">预览本题</button><button id="fill">填充本题</button></div>
       <div id="preview"></div>
       <div class="muted">检查全部匹配</div>
@@ -2778,7 +2818,7 @@
     const controller = new Controller(win, {}, {
       log(message) { logLines.push(message); el('log').textContent = logLines.slice(-30).join('\n'); el('log').scrollTop = el('log').scrollHeight; },
       change() {
-        for (const id of ['load','previewButton','fill','scan','fillAll','settings','import','course','chapter','overwrite','imageOrder','engineeringOrder','skipUnmatched']) el(id).disabled = controller.busy;
+        for (const id of ['load','previewButton','fill','scan','fillAll','settings','import','course','chapter','overwrite','imageOrder','engineeringOrder','careerOrder','skipUnmatched']) el(id).disabled = controller.busy;
         el('submit').disabled = controller.busy || !controller.plan || !controller.trial;
         el('submit').textContent = controller.config.skipUnmatched ? '逐题填充并提交（仅已匹配题）' : '逐题填充并提交';
         el('fillAll').textContent = controller.config.skipUnmatched ? '只填充已匹配题' : '只填充全部';
@@ -2810,11 +2850,11 @@
     function installEntries(entries) {
       const previousChapter = controller.chapter;
       controller.entries = entries; controller.lastScan = null; el('preview').replaceChildren(); controller.invalidate(true);
-      el('chapter').replaceChildren(new win.Option('自动按题干匹配全部章节', ''));
+      el('chapter').replaceChildren(new win.Option(controller.course === 'career' ? '请选择对应章节（来源无第一章）' : '自动按题干匹配全部章节', ''));
       for (const chapter of new Set(entries.map(e => e.chapter))) el('chapter').add(new win.Option(chapter, chapter));
-      const defaultChapter = controller.course === 'engineering' ? ENGINEERING_CHAPTER : RESEARCH_CHAPTER;
+      const defaultChapter = controller.course === 'career' ? CAREER_CHAPTER : controller.course === 'engineering' ? ENGINEERING_CHAPTER : RESEARCH_CHAPTER;
       controller.chapter = controller.course !== 'ai' ? (entries.some(entry => entry.chapter === previousChapter) ? previousChapter : defaultChapter) : ''; el('chapter').value = controller.chapter;
-      controller.log('已读取 ' + entries.length + ' 条参考记录。' + (controller.course === 'research' ? '来源：你提供的科研伦理与学术规范第一至六章答案（本地题库）。' : controller.course === 'engineering' ? '来源：公众号研鸽《工程伦理mooc》（本地题库，13章）。请确认所选章节、题号和选项顺序一致；对→√，错→×。' : ''));
+      controller.log('已读取 ' + entries.length + ' 条参考记录。' + (controller.course === 'research' ? '来源：你提供的科研伦理与学术规范第一至六章答案（本地题库）。' : controller.course === 'engineering' ? '来源：公众号研鸽《工程伦理mooc》（本地题库，13章）。请确认所选章节、题号和选项顺序一致；对→√，错→×。' : controller.course === 'career' ? '来源：CSDN 河大小库里《研究生生涯发展与规划雨课堂答案》（第二至十四章，本地题库）。第二章第9题D、第10题B按用户核对修正。请确认章节及题号、选项顺序一致。' : ''));
     }
     function importSource(html) {
       assert(controller.course === 'ai', '当前课程使用本地题库，请点击“读取本地题库”。');
@@ -2838,7 +2878,8 @@
       assert(controller.entries.length, '先读取参考题库。');
       const area = el('preview'); area.replaceChildren();
       const question = controller.current(), match = controller.resolve(question);
-      const title = win.document.createElement('p'); title.textContent = match.status === 'matched' ? (match.manual ? '采用手工核对答案' : (['chapter-order','engineering-order'].includes(match.method) ? '按题号匹配，来源：' : '来源：') + match.entry.chapter + '，第 ' + match.entry.sourceIndex + ' 条') : match.reason; area.append(title);
+      const title = win.document.createElement('p'); title.textContent = match.status === 'matched' ? (match.manual ? '采用手工核对答案' : (['chapter-order','engineering-order','career-order'].includes(match.method) ? '按题号匹配，来源：' : '来源：') + match.entry.chapter + '，第 ' + match.entry.sourceIndex + ' 条') : match.reason; area.append(title);
+      if (match.entry?.referenceCorrection) { const note = win.document.createElement('p'); note.className = 'muted'; note.textContent = match.entry.referenceCorrection; area.append(note); }
       if (question.type === 'unsupported') return;
       const boxes = question.options ? question.options.map(option => {
         const label = win.document.createElement('label'), input = win.document.createElement('input');
@@ -2883,8 +2924,9 @@
       controller.entries = []; controller.chapter = ''; controller.lastScan = null; controller.overrides.clear();
       el('preview').replaceChildren(); el('chapter').replaceChildren(new win.Option('自动按题干匹配全部章节', '')); el('sourceHtml').value = '';
       el('sourceImport').hidden = controller.course !== 'ai'; el('load').textContent = controller.course !== 'ai' ? '读取本地题库' : '读取参考题库';
-      el('engineeringOrderLabel').hidden = controller.course !== 'engineering'; el('imageOrderLabel').hidden = controller.course === 'engineering';
-      el('matchMode').textContent = controller.course === 'engineering' ? '工程伦理：请确认章节、题号和选项顺序一致。对→√，错→×；第八章填空按完整题干和空格匹配。每题单独提交。' : '支持填空、单选、多选、判断；按题干和答案匹配，每题单独提交。';
+      el('engineeringOrderLabel').hidden = controller.course !== 'engineering';
+      el('careerOrderLabel').hidden = controller.course !== 'career'; el('imageOrderLabel').hidden = controller.course === 'engineering' || controller.course === 'career';
+      el('matchMode').textContent = controller.course === 'career' ? '生涯规划：第二至十四章，每章10题。请确认章节、题号和选项顺序一致。对→√，错→×；每题单独提交。' : controller.course === 'engineering' ? '工程伦理：请确认章节、题号和选项顺序一致。对→√，错→×；第八章填空按完整题干和空格匹配。每题单独提交。' : '支持填空、单选、多选、判断；按题干和答案匹配，每题单独提交。';
       controller.invalidate(true);
       const localEntries = localCourseEntries(controller.course);
       if (localEntries) installEntries(localEntries);
@@ -2893,6 +2935,7 @@
     el('chapter').addEventListener('change', () => { controller.chapter = el('chapter').value; el('preview').replaceChildren(); controller.invalidate(true); });
     el('imageOrder').addEventListener('change', () => { controller.config.imageOrder = el('imageOrder').checked; el('preview').replaceChildren(); controller.invalidate(true); });
     el('engineeringOrder').addEventListener('change', () => { controller.config.engineeringOrder = el('engineeringOrder').checked; el('preview').replaceChildren(); controller.invalidate(true); });
+    el('careerOrder').addEventListener('change', () => { controller.config.careerOrder = el('careerOrder').checked; el('preview').replaceChildren(); controller.invalidate(true); });
     el('skipUnmatched').addEventListener('change', () => { controller.config.skipUnmatched = el('skipUnmatched').checked; controller.invalidate(true); controller.log('已' + (controller.config.skipUnmatched ? '启用' : '关闭') + '跳过待核对题，请从头检查匹配并试填一题。'); });
     bind('settings', () => {
       for (const name of ['answerSelector','questionSelector','navSelector','submitSelector']) {
@@ -2908,5 +2951,5 @@
     });
     if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('显示雨课堂填充面板', () => { shadow.querySelector('section').classList.remove('min'); el('toggle').textContent = '收起'; panelDrag.keepVisible(); });
   }
-  return { SOURCE, VERSION, RESEARCH_CHAPTER, RESEARCH_SOURCE, researchEntries, ENGINEERING_CHAPTER, ENGINEERING_SOURCE, engineeringEntries, matchEngineeringQuestion, DEFAULTS, PACING, norm, parseArticle, parseJudgmentAnswer, judgmentStem, align, matchQuestion, matchChoiceQuestion, matchJudgmentQuestion, matchImageQuestion, matchOrderingQuestion, choiceAnswers, questionValues, questionReadonly, hasAnswers, readChoiceQuestion, readQuestion, findAnswerFields, fontDescriptor, encryptedFont, fontOutlines, canonicalOutline, decodeFont, requestFont, submissionConfirmation, exerciseDocument, discoverNavigation, Controller, mount };
+  return { SOURCE, VERSION, RESEARCH_CHAPTER, RESEARCH_SOURCE, researchEntries, ENGINEERING_CHAPTER, ENGINEERING_SOURCE, engineeringEntries, matchEngineeringQuestion, CAREER_CHAPTER, CAREER_SOURCE, careerEntries, matchCareerQuestion, DEFAULTS, PACING, norm, parseArticle, parseJudgmentAnswer, judgmentStem, align, matchQuestion, matchChoiceQuestion, matchJudgmentQuestion, matchImageQuestion, matchOrderingQuestion, choiceAnswers, questionValues, questionReadonly, hasAnswers, readChoiceQuestion, readQuestion, findAnswerFields, fontDescriptor, encryptedFont, fontOutlines, canonicalOutline, decodeFont, requestFont, submissionConfirmation, exerciseDocument, discoverNavigation, Controller, mount };
 });

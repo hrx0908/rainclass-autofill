@@ -1,6 +1,6 @@
 {
   "name": "rainclass-autofill",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "private": true,
   "description": "雨课堂学习辅助油猴脚本：题干匹配、预览核对与检查续查。",
   "license": "MIT",
