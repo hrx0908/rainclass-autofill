@@ -128,6 +128,8 @@ test('career manual answers remain scoped to both course and displayed ordinal',
 test('career course selector loads offline, preserves chapters, displays correction and clears stale course state', async () => {
   const f = careerFixture(); let requests = 0; f.win.GM_xmlhttpRequest = () => { requests++; };
   api.mount(f.win); const ui = f.doc.getElementById('rainclass-autofill-panel').shadowRoot;
+  assert.deepEqual([...ui.getElementById('course').options].map(option => option.value), ['ai','research','engineering','career']);
+  assert.equal(api.literacyEntries, undefined); assert.equal(api.matchLiteracyQuestion, undefined);
   const select = course => { ui.getElementById('course').value = course; ui.getElementById('course').dispatchEvent(new f.win.Event('change')); };
   select('career'); assert.equal(requests, 0); assert.match(ui.getElementById('log').textContent, /已读取 130 条/);
   assert.equal(ui.getElementById('chapter').value, api.CAREER_CHAPTER); assert.equal(ui.getElementById('chapter').options.length, 14);
